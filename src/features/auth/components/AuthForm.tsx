@@ -6,23 +6,35 @@ import { useRouter } from "next/navigation";
 import { useUser } from "@clerk/nextjs";
 import { useSignIn, useSignUp } from "@clerk/nextjs/legacy";
 import { Mail, Lock, User, Loader2, ArrowLeft } from "lucide-react";
-import { GoogleIcon } from "@/components/ui/GoogleIcon";
+import {
+  SOCIAL_PROVIDERS_MAP,
+  SocialProvider,
+  OAuthStrategyName,
+} from "../config/social-providers";
 
 export type AuthMode = "sign-in" | "sign-up";
 
 interface AuthFormProps {
   mode: AuthMode;
+  /**
+   * List of social providers to render dynamically.
+   * Default: `["google", "apple", "facebook"]`
+   */
+  socialProviders?: SocialProvider[];
 }
 
 /**
  * `AuthForm` — Unified, reusable Auth component for Sign In and Sign Up.
  *
  * Design Pattern: Strategy / Dynamic Component Pattern
- * Reuses identical card layout, input styles, Google OAuth handler,
+ * Reuses identical card layout, input styles, dynamic Social Providers,
  * and brand header while dynamically adapting form fields, titles,
  * Clerk authentication handlers, and navigation links.
  */
-export function AuthForm({ mode }: AuthFormProps) {
+export function AuthForm({
+  mode,
+  socialProviders = ["google", "apple", "facebook"],
+}: AuthFormProps) {
   const isSignIn = mode === "sign-in";
   const router = useRouter();
 
@@ -133,28 +145,28 @@ export function AuthForm({ mode }: AuthFormProps) {
     }
   };
 
-  // Handle Google OAuth Sign In / Sign Up
-  const handleGoogleAuth = async () => {
+  // Handle Dynamic Social OAuth Sign In / Sign Up
+  const handleSocialAuth = async (strategy: OAuthStrategyName) => {
     if (!isLoaded) return;
     setIsLoading(true);
 
     try {
       if (isSignIn && signIn) {
         await signIn.authenticateWithRedirect({
-          strategy: "oauth_google",
+          strategy,
           redirectUrl: "/sso-callback",
           redirectUrlComplete: "/",
         });
       } else if (!isSignIn && signUp) {
         await signUp.authenticateWithRedirect({
-          strategy: "oauth_google",
+          strategy,
           redirectUrl: "/sso-callback",
           redirectUrlComplete: "/",
         });
       }
     } catch (err) {
-      console.error(`[AuthForm:Google] Error:`, err);
-      setError("Failed to initiate Google authentication.");
+      console.error(`[AuthForm:Social] Error (${strategy}):`, err);
+      setError("Failed to initiate social authentication.");
       setIsLoading(false);
     }
   };
@@ -376,26 +388,50 @@ export function AuthForm({ mode }: AuthFormProps) {
               </button>
             </form>
 
-            {/* Divider */}
-            <div className="relative my-6 text-center">
-              <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-slate-200 dark:border-slate-800" />
-              </div>
-              <span className="relative px-3 bg-white dark:bg-slate-900 text-[11px] font-medium text-slate-400 dark:text-slate-500 uppercase tracking-wider">
-                Or continue with
-              </span>
-            </div>
+            {/* Dynamic Social Login Section */}
+            {socialProviders.length > 0 && (
+              <>
+                <div className="relative my-6 text-center">
+                  <div className="absolute inset-0 flex items-center">
+                    <div className="w-full border-t border-slate-200 dark:border-slate-800" />
+                  </div>
+                  <span className="relative px-3 bg-white dark:bg-slate-900 text-[11px] font-medium text-slate-400 dark:text-slate-500 uppercase tracking-wider">
+                    Or continue with
+                  </span>
+                </div>
 
-            {/* Google OAuth Button */}
-            <button
-              type="button"
-              onClick={handleGoogleAuth}
-              disabled={isLoading || !isLoaded}
-              className="w-full py-2.5 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-900 text-sm font-medium text-slate-700 dark:text-slate-200 transition shadow-xs flex items-center justify-center gap-2.5 disabled:opacity-60 disabled:cursor-not-allowed"
-            >
-              <GoogleIcon />
-              <span>Google</span>
-            </button>
+                {/* Social Buttons Container */}
+                <div
+                  className={
+                    socialProviders.length === 1
+                      ? "flex flex-col gap-2.5"
+                      : "grid grid-cols-3 gap-2.5"
+                  }
+                >
+                  {socialProviders.map((providerKey) => {
+                    const provider = SOCIAL_PROVIDERS_MAP[providerKey];
+                    if (!provider) return null;
+                    const IconComponent = provider.icon;
+
+                    return (
+                      <button
+                        key={provider.id}
+                        type="button"
+                        onClick={() => handleSocialAuth(provider.strategy)}
+                        disabled={isLoading || !isLoaded}
+                        title={`Continue with ${provider.name}`}
+                        className="w-full py-2.5 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-900 text-sm font-medium text-slate-700 dark:text-slate-200 transition shadow-xs flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
+                      >
+                        <IconComponent />
+                        <span className={socialProviders.length > 1 ? "hidden sm:inline text-xs" : "text-sm"}>
+                          {provider.name}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            )}
 
             {/* Footer Link */}
             <p className="text-xs text-slate-600 dark:text-slate-400 text-center mt-6">
