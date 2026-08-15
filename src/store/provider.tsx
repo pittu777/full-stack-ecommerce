@@ -1,6 +1,5 @@
 "use client";
 
-import { useRef } from "react";
 import { Provider } from "react-redux";
 import { store } from "./index";
 import type { ReactNode } from "react";
@@ -19,12 +18,5 @@ import type { ReactNode } from "react";
  *   <ReduxProvider>{children}</ReduxProvider>
  */
 export function ReduxProvider({ children }: { children: ReactNode }) {
-  // useRef ensures the store is only created once per Provider mount,
-  // even if the parent component re-renders.
-  const storeRef = useRef<typeof store | null>(null);
-  if (!storeRef.current) {
-    storeRef.current = store;
-  }
-
-  return <Provider store={storeRef.current}>{children}</Provider>;
+  return <Provider store={store}>{children}</Provider>;
 }

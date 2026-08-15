@@ -3,7 +3,6 @@ import type { ReactNode } from "react";
 import { Geist, Geist_Mono } from "next/font/google";
 import { ClerkProvider } from "@clerk/nextjs";
 import { ReduxProvider } from "@/store/provider";
-import { Header } from "@/components/layout/Header";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -33,10 +32,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
       >
         <body className="min-h-full flex flex-col bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-50">
-          <ReduxProvider>
-            <Header />
-            <main className="flex-1">{children}</main>
-          </ReduxProvider>
+          <ReduxProvider>{children}</ReduxProvider>
         </body>
       </html>
     </ClerkProvider>

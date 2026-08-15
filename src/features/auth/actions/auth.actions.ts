@@ -1,6 +1,6 @@
 "use server";
 
-import prisma from "@/lib/prisma";
+import { prisma } from "@/lib/prisma";
 import { hashPassword, verifyPassword } from "@/lib/auth/password";
 import {
   setSessionCookie,
@@ -39,7 +39,7 @@ export async function registerAction(
     const normalizedEmail = email.toLowerCase().trim();
 
     // Check if user already exists
-    const existingUser = await prisma.user.findUnique({
+    const existingUser = await prisma.users.findUnique({
       where: { email: normalizedEmail },
     });
 
@@ -54,7 +54,7 @@ export async function registerAction(
     const hashedPassword = await hashPassword(password);
 
     // Create user in PostgreSQL database
-    const newUser = await prisma.user.create({
+    const newUser = await prisma.users.create({
       data: {
         name: fullName.trim(),
         email: normalizedEmail,
@@ -66,7 +66,7 @@ export async function registerAction(
     const sessionPayload: SessionPayload = {
       userId: newUser.id,
       email: newUser.email,
-      name: newUser.name,
+      name: newUser.name || fullName.trim(),
       role: newUser.role,
     };
 
@@ -104,11 +104,11 @@ export async function loginAction(
     const normalizedEmail = email.toLowerCase().trim();
 
     // Look up user by unique email
-    const user = await prisma.user.findUnique({
+    const user = await prisma.users.findUnique({
       where: { email: normalizedEmail },
     });
 
-    if (!user) {
+    if (!user || !user.password) {
       return {
         success: false,
         error: "Invalid email or password. Please try again.",
@@ -128,7 +128,7 @@ export async function loginAction(
     const sessionPayload: SessionPayload = {
       userId: user.id,
       email: user.email,
-      name: user.name,
+      name: user.name || user.firstName || user.email,
       role: user.role,
     };
 
