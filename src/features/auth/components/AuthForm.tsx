@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useUser } from "@clerk/nextjs";
 import { useSignIn, useSignUp } from "@clerk/nextjs/legacy";
 import { Mail, Lock, User, Loader2, ArrowLeft } from "lucide-react";
 import { GoogleIcon } from "@/components/ui/GoogleIcon";
@@ -26,10 +27,18 @@ export function AuthForm({ mode }: AuthFormProps) {
   const router = useRouter();
 
   // Clerk hooks
+  const { isSignedIn, isLoaded: isUserLoaded } = useUser();
   const { isLoaded: isSignInLoaded, signIn, setActive: setSignInActive } = useSignIn();
   const { isLoaded: isSignUpLoaded, signUp, setActive: setSignUpActive } = useSignUp();
 
   const isLoaded = isSignIn ? isSignInLoaded : isSignUpLoaded;
+
+  // Redirect client-side if user is already signed in
+  useEffect(() => {
+    if (isUserLoaded && isSignedIn) {
+      router.push("/");
+    }
+  }, [isUserLoaded, isSignedIn, router]);
 
   // Form states
   const [firstName, setFirstName] = useState("");
@@ -149,6 +158,15 @@ export function AuthForm({ mode }: AuthFormProps) {
       setIsLoading(false);
     }
   };
+
+  if (isUserLoaded && isSignedIn) {
+    return (
+      <div className="w-full flex flex-col items-center justify-center p-8">
+        <div className="w-6 h-6 border-2 border-[#3b38d6] border-t-transparent rounded-full animate-spin" />
+        <p className="text-xs text-slate-500 mt-2">Redirecting to Home...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="w-full flex flex-col items-center">

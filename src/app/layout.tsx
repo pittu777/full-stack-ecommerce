@@ -45,6 +45,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       >
         <body className="font-[family-name:var(--font-outfit)] min-h-full flex flex-col bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-50">
           <ReduxProvider>
+            <Header />
             <main className="flex-1">{children}</main>
           </ReduxProvider>
         </body>
