@@ -45,13 +45,6 @@ export function AuthForm({
 
   const isLoaded = isSignIn ? isSignInLoaded : isSignUpLoaded;
 
-  // Redirect client-side if user is already signed in
-  useEffect(() => {
-    if (isUserLoaded && isSignedIn) {
-      router.push("/");
-    }
-  }, [isUserLoaded, isSignedIn, router]);
-
   // Form states
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
@@ -70,6 +63,25 @@ export function AuthForm({
 
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+
+  // Redirect client-side if user is already signed in
+  useEffect(() => {
+    if (isUserLoaded && isSignedIn) {
+      router.push("/");
+    }
+  }, [isUserLoaded, isSignedIn, router]);
+
+  // Auto-reset loading state when window regains focus (e.g. user closes OAuth popup or cancels)
+  useEffect(() => {
+    const handleWindowFocus = () => {
+      setIsLoading(false);
+    };
+
+    window.addEventListener("focus", handleWindowFocus);
+    return () => {
+      window.removeEventListener("focus", handleWindowFocus);
+    };
+  }, []);
 
   // Reset form errors when switching views
   const resetViewState = () => {
@@ -220,6 +232,7 @@ export function AuthForm({
   // Handle Dynamic Social OAuth Sign In / Sign Up
   const handleSocialAuth = async (strategy: OAuthStrategyName) => {
     if (!isLoaded) return;
+    setError(null);
     setIsLoading(true);
 
     try {
@@ -236,10 +249,21 @@ export function AuthForm({
           redirectUrlComplete: "/",
         });
       }
-    } catch (err) {
+    } catch (err: unknown) {
       console.error(`[AuthForm:Social] Error (${strategy}):`, err);
-      setError("Failed to initiate social authentication.");
       setIsLoading(false);
+
+      if (err && typeof err === "object" && "errors" in err) {
+        const clerkErr = err as { errors: Array<{ longMessage?: string; message?: string }> };
+        const msg = clerkErr.errors[0]?.longMessage || clerkErr.errors[0]?.message || "";
+        if (msg.toLowerCase().includes("cancel") || msg.toLowerCase().includes("close") || msg.toLowerCase().includes("popup")) {
+          setError("Authentication cancelled by user.");
+        } else {
+          setError(msg || "Authentication cancelled or failed. Please try again.");
+        }
+      } else {
+        setError("Authentication cancelled by user.");
+      }
     }
   };
 
@@ -479,8 +503,15 @@ export function AuthForm({
 
             {/* Error Message */}
             {error && (
-              <div className="mb-5 p-3 rounded-lg bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900 text-xs text-red-600 dark:text-red-400">
-                {error}
+              <div className="mb-5 p-3 rounded-lg bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900 text-xs text-red-600 dark:text-red-400 flex items-center justify-between">
+                <span>{error}</span>
+                <button
+                  type="button"
+                  onClick={() => setError(null)}
+                  className="text-red-400 hover:text-red-600 ml-2 font-bold"
+                >
+                  ✕
+                </button>
               </div>
             )}
 
