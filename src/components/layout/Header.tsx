@@ -25,18 +25,7 @@ export function Header() {
         </Link>
 
         {/* Navigation Links */}
-        <nav className="hidden md:flex items-center gap-6 text-sm font-medium text-slate-600 dark:text-slate-300">
-          <Link href="/" className="transition hover:text-slate-900 dark:hover:text-slate-50">
-            Home
-          </Link>
-          <Link href="/products" className="transition hover:text-slate-900 dark:hover:text-slate-50">
-            Products
-          </Link>
-          <Link href="/categories" className="transition hover:text-slate-900 dark:hover:text-slate-50">
-            Categories
-          </Link>
-        </nav>
-
+      
         {/* Auth / Profile Area (Top Right) */}
         <div className="flex items-center gap-4">
           {isLoaded && isSignedIn ? (

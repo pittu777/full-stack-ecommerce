@@ -1,31 +1,45 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useUser } from "@clerk/nextjs";
 import { useSignIn, useSignUp } from "@clerk/nextjs/legacy";
-import { Mail, Lock, User, Loader2, ArrowLeft } from "lucide-react";
-import { GoogleIcon } from "@/components/ui/GoogleIcon";
+import { Mail, Lock, User, Loader2, ArrowLeft, KeyRound } from "lucide-react";
+import {
+  SOCIAL_PROVIDERS_MAP,
+  SocialProvider,
+  OAuthStrategyName,
+} from "../config/social-providers";
 
 export type AuthMode = "sign-in" | "sign-up";
 
 interface AuthFormProps {
   mode: AuthMode;
+  /**
+   * List of social providers to render dynamically.
+   * Default: `["google", "apple", "facebook"]`
+   */
+  socialProviders?: SocialProvider[];
 }
 
 /**
- * `AuthForm` — Unified, reusable Auth component for Sign In and Sign Up.
+ * `AuthForm` — Unified, reusable Auth component for Sign In, Sign Up, and Password Reset.
  *
  * Design Pattern: Strategy / Dynamic Component Pattern
- * Reuses identical card layout, input styles, Google OAuth handler,
+ * Reuses identical card layout, input styles, dynamic Social Providers,
  * and brand header while dynamically adapting form fields, titles,
  * Clerk authentication handlers, and navigation links.
  */
-export function AuthForm({ mode }: AuthFormProps) {
+export function AuthForm({
+  mode,
+  socialProviders = ["google", "apple", "facebook"],
+}: AuthFormProps) {
   const isSignIn = mode === "sign-in";
   const router = useRouter();
 
   // Clerk hooks
+  const { isSignedIn, isLoaded: isUserLoaded } = useUser();
   const { isLoaded: isSignInLoaded, signIn, setActive: setSignInActive } = useSignIn();
   const { isLoaded: isSignUpLoaded, signUp, setActive: setSignUpActive } = useSignUp();
 
@@ -42,10 +56,40 @@ export function AuthForm({ mode }: AuthFormProps) {
   const [pendingVerification, setPendingVerification] = useState(false);
   const [verificationCode, setVerificationCode] = useState("");
 
+  // Password Reset states
+  const [isForgotPassword, setIsForgotPassword] = useState(false);
+  const [resetCodeSent, setResetCodeSent] = useState(false);
+  const [newPassword, setNewPassword] = useState("");
+
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
-  // Handle Form Submission
+  // Redirect client-side if user is already signed in
+  useEffect(() => {
+    if (isUserLoaded && isSignedIn) {
+      router.push("/");
+    }
+  }, [isUserLoaded, isSignedIn, router]);
+
+  // Auto-reset loading state when window regains focus (e.g. user closes OAuth popup or cancels)
+  useEffect(() => {
+    const handleWindowFocus = () => {
+      setIsLoading(false);
+    };
+
+    window.addEventListener("focus", handleWindowFocus);
+    return () => {
+      window.removeEventListener("focus", handleWindowFocus);
+    };
+  }, []);
+
+  // Reset form errors when switching views
+  const resetViewState = () => {
+    setError(null);
+    setIsLoading(false);
+  };
+
+  // Handle Form Submission (Sign In & Sign Up)
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!isLoaded) return;
@@ -94,6 +138,67 @@ export function AuthForm({ mode }: AuthFormProps) {
     }
   };
 
+  // Handle Request Password Reset Code (Step 1)
+  const handleRequestResetCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!signIn) return;
+
+    setError(null);
+    setIsLoading(true);
+
+    try {
+      await signIn.create({
+        strategy: "reset_password_email_code",
+        identifier: email,
+      });
+      setResetCodeSent(true);
+    } catch (err: unknown) {
+      console.error("[AuthForm:RequestReset] Error:", err);
+      if (err && typeof err === "object" && "errors" in err) {
+        const clerkErr = err as { errors: Array<{ longMessage?: string; message?: string }> };
+        setError(clerkErr.errors[0]?.longMessage || clerkErr.errors[0]?.message || "Failed to send reset code.");
+      } else {
+        setError("Could not find an account registered with that email address.");
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Handle Verify Code & Save New Password (Step 2)
+  const handleConfirmResetPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!signIn) return;
+
+    setError(null);
+    setIsLoading(true);
+
+    try {
+      const result = await signIn.attemptFirstFactor({
+        strategy: "reset_password_email_code",
+        code: verificationCode,
+        password: newPassword,
+      });
+
+      if (result.status === "complete" && result.createdSessionId) {
+        await setSignInActive({ session: result.createdSessionId });
+        router.push("/");
+      } else {
+        setError("Password reset incomplete. Please try again.");
+      }
+    } catch (err: unknown) {
+      console.error("[AuthForm:ConfirmReset] Error:", err);
+      if (err && typeof err === "object" && "errors" in err) {
+        const clerkErr = err as { errors: Array<{ longMessage?: string; message?: string }> };
+        setError(clerkErr.errors[0]?.longMessage || clerkErr.errors[0]?.message || "Invalid code or weak password.");
+      } else {
+        setError("Failed to reset password. Please check your code and try again.");
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   // Handle Email Verification Code (Sign Up only)
   const handleVerifyCode = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -124,31 +229,52 @@ export function AuthForm({ mode }: AuthFormProps) {
     }
   };
 
-  // Handle Google OAuth Sign In / Sign Up
-  const handleGoogleAuth = async () => {
+  // Handle Dynamic Social OAuth Sign In / Sign Up
+  const handleSocialAuth = async (strategy: OAuthStrategyName) => {
     if (!isLoaded) return;
+    setError(null);
     setIsLoading(true);
 
     try {
       if (isSignIn && signIn) {
         await signIn.authenticateWithRedirect({
-          strategy: "oauth_google",
+          strategy,
           redirectUrl: "/sso-callback",
           redirectUrlComplete: "/",
         });
       } else if (!isSignIn && signUp) {
         await signUp.authenticateWithRedirect({
-          strategy: "oauth_google",
+          strategy,
           redirectUrl: "/sso-callback",
           redirectUrlComplete: "/",
         });
       }
-    } catch (err) {
-      console.error(`[AuthForm:Google] Error:`, err);
-      setError("Failed to initiate Google authentication.");
+    } catch (err: unknown) {
+      console.error(`[AuthForm:Social] Error (${strategy}):`, err);
       setIsLoading(false);
+
+      if (err && typeof err === "object" && "errors" in err) {
+        const clerkErr = err as { errors: Array<{ longMessage?: string; message?: string }> };
+        const msg = clerkErr.errors[0]?.longMessage || clerkErr.errors[0]?.message || "";
+        if (msg.toLowerCase().includes("cancel") || msg.toLowerCase().includes("close") || msg.toLowerCase().includes("popup")) {
+          setError("Authentication cancelled by user.");
+        } else {
+          setError(msg || "Authentication cancelled or failed. Please try again.");
+        }
+      } else {
+        setError("Authentication cancelled by user.");
+      }
     }
   };
+
+  if (isUserLoaded && isSignedIn) {
+    return (
+      <div className="w-full flex flex-col items-center justify-center p-8">
+        <div className="w-6 h-6 border-2 border-[#3b38d6] border-t-transparent rounded-full animate-spin" />
+        <p className="text-xs text-slate-500 mt-2">Redirecting to Home...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="w-full flex flex-col items-center">
@@ -159,8 +285,149 @@ export function AuthForm({ mode }: AuthFormProps) {
 
       {/* Card Container */}
       <div className="w-full max-w-[440px] bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-2xl p-8 sm:p-10 shadow-sm">
-        {/* Verification Screen (Sign Up only) */}
-        {!isSignIn && pendingVerification ? (
+        {/* --- VIEW 1: FORGOT PASSWORD FLOW --- */}
+        {isForgotPassword ? (
+          <div>
+            <button
+              type="button"
+              onClick={() => {
+                setIsForgotPassword(false);
+                setResetCodeSent(false);
+                resetViewState();
+              }}
+              className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-500 hover:text-slate-900 dark:hover:text-white mb-4 transition"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" /> Back to Sign In
+            </button>
+
+            {!resetCodeSent ? (
+              /* Step 1: Enter Email for Reset Code */
+              <div>
+                <div className="text-center mb-6">
+                  <h2 className="text-2xl font-bold text-slate-900 dark:text-white">
+                    Reset password
+                  </h2>
+                  <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1">
+                    Enter your email address to receive a 6-digit verification code.
+                  </p>
+                </div>
+
+                {error && (
+                  <div className="mb-5 p-3 rounded-lg bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900 text-xs text-red-600 dark:text-red-400">
+                    {error}
+                  </div>
+                )}
+
+                <form onSubmit={handleRequestResetCode} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                      Email
+                    </label>
+                    <div className="relative flex items-center">
+                      <Mail className="absolute left-3.5 w-4 h-4 text-slate-400" />
+                      <input
+                        type="email"
+                        required
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        placeholder="Enter your email"
+                        className="w-full pl-10 pr-4 py-2.5 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-sm text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#3b38d6]/20 focus:border-[#3b38d6] transition"
+                      />
+                    </div>
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={isLoading || !isLoaded}
+                    className="w-full py-2.5 bg-[#3b38d6] hover:bg-[#312cc4] active:bg-[#2823a9] text-white font-medium text-sm rounded-xl transition shadow-sm flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
+                  >
+                    {isLoading ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Sending code...
+                      </>
+                    ) : (
+                      "Send Reset Code"
+                    )}
+                  </button>
+                </form>
+              </div>
+            ) : (
+              /* Step 2: Enter Code & New Password */
+              <div>
+                <div className="text-center mb-6">
+                  <h2 className="text-2xl font-bold text-slate-900 dark:text-white">
+                    Set new password
+                  </h2>
+                  <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1">
+                    We sent a code to{" "}
+                    <span className="font-semibold text-slate-900 dark:text-white">
+                      {email}
+                    </span>
+                  </p>
+                </div>
+
+                {error && (
+                  <div className="mb-5 p-3 rounded-lg bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900 text-xs text-red-600 dark:text-red-400">
+                    {error}
+                  </div>
+                )}
+
+                <form onSubmit={handleConfirmResetPassword} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                      Reset Code
+                    </label>
+                    <div className="relative flex items-center">
+                      <KeyRound className="absolute left-3.5 w-4 h-4 text-slate-400" />
+                      <input
+                        type="text"
+                        required
+                        value={verificationCode}
+                        onChange={(e) => setVerificationCode(e.target.value)}
+                        placeholder="Enter 6-digit code"
+                        className="w-full pl-10 pr-4 py-2.5 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-sm text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#3b38d6]/20 focus:border-[#3b38d6] transition"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                      New Password
+                    </label>
+                    <div className="relative flex items-center">
+                      <Lock className="absolute left-3.5 w-4 h-4 text-slate-400" />
+                      <input
+                        type="password"
+                        required
+                        value={newPassword}
+                        onChange={(e) => setNewPassword(e.target.value)}
+                        placeholder="••••••••"
+                        className="w-full pl-10 pr-4 py-2.5 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl text-sm text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#3b38d6]/20 focus:border-[#3b38d6] transition"
+                      />
+                    </div>
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={isLoading || !isLoaded}
+                    className="w-full py-2.5 bg-[#3b38d6] hover:bg-[#312cc4] active:bg-[#2823a9] text-white font-medium text-sm rounded-xl transition shadow-sm flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
+                  >
+                    {isLoading ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Resetting password...
+                      </>
+                    ) : (
+                      "Reset Password & Sign In"
+                    )}
+                  </button>
+                </form>
+              </div>
+            )}
+          </div>
+        ) : !isSignIn && pendingVerification ? (
+          /* --- VIEW 2: SIGN UP EMAIL VERIFICATION --- */
           <div>
             <button
               type="button"
@@ -220,7 +487,7 @@ export function AuthForm({ mode }: AuthFormProps) {
             </form>
           </div>
         ) : (
-          /* Standard Auth Form */
+          /* --- VIEW 3: STANDARD AUTH FORM (SIGN IN / SIGN UP) --- */
           <div>
             {/* Header */}
             <div className="text-center mb-6">
@@ -236,8 +503,15 @@ export function AuthForm({ mode }: AuthFormProps) {
 
             {/* Error Message */}
             {error && (
-              <div className="mb-5 p-3 rounded-lg bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900 text-xs text-red-600 dark:text-red-400">
-                {error}
+              <div className="mb-5 p-3 rounded-lg bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900 text-xs text-red-600 dark:text-red-400 flex items-center justify-between">
+                <span>{error}</span>
+                <button
+                  type="button"
+                  onClick={() => setError(null)}
+                  className="text-red-400 hover:text-red-600 ml-2 font-bold"
+                >
+                  ✕
+                </button>
               </div>
             )}
 
@@ -333,7 +607,10 @@ export function AuthForm({ mode }: AuthFormProps) {
                   </label>
 
                   <span
-                    onClick={() => alert("Password reset link will be sent to your email.")}
+                    onClick={() => {
+                      setIsForgotPassword(true);
+                      resetViewState();
+                    }}
                     className="text-xs font-semibold text-[#3b38d6] dark:text-indigo-400 hover:underline cursor-pointer"
                   >
                     Forgot Password?
@@ -358,26 +635,50 @@ export function AuthForm({ mode }: AuthFormProps) {
               </button>
             </form>
 
-            {/* Divider */}
-            <div className="relative my-6 text-center">
-              <div className="absolute inset-0 flex items-center">
-                <div className="w-full border-t border-slate-200 dark:border-slate-800" />
-              </div>
-              <span className="relative px-3 bg-white dark:bg-slate-900 text-[11px] font-medium text-slate-400 dark:text-slate-500 uppercase tracking-wider">
-                Or continue with
-              </span>
-            </div>
+            {/* Dynamic Social Login Section */}
+            {socialProviders.length > 0 && (
+              <>
+                <div className="relative my-6 text-center">
+                  <div className="absolute inset-0 flex items-center">
+                    <div className="w-full border-t border-slate-200 dark:border-slate-800" />
+                  </div>
+                  <span className="relative px-3 bg-white dark:bg-slate-900 text-[11px] font-medium text-slate-400 dark:text-slate-500 uppercase tracking-wider">
+                    Or continue with
+                  </span>
+                </div>
 
-            {/* Google OAuth Button */}
-            <button
-              type="button"
-              onClick={handleGoogleAuth}
-              disabled={isLoading || !isLoaded}
-              className="w-full py-2.5 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-900 text-sm font-medium text-slate-700 dark:text-slate-200 transition shadow-xs flex items-center justify-center gap-2.5 disabled:opacity-60 disabled:cursor-not-allowed"
-            >
-              <GoogleIcon />
-              <span>Google</span>
-            </button>
+                {/* Social Buttons Container */}
+                <div
+                  className={
+                    socialProviders.length === 1
+                      ? "flex flex-col gap-2.5"
+                      : "grid grid-cols-3 gap-2.5"
+                  }
+                >
+                  {socialProviders.map((providerKey) => {
+                    const provider = SOCIAL_PROVIDERS_MAP[providerKey];
+                    if (!provider) return null;
+                    const IconComponent = provider.icon;
+
+                    return (
+                      <button
+                        key={provider.id}
+                        type="button"
+                        onClick={() => handleSocialAuth(provider.strategy)}
+                        disabled={isLoading || !isLoaded}
+                        title={`Continue with ${provider.name}`}
+                        className="w-full py-2.5 bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-800 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-900 text-sm font-medium text-slate-700 dark:text-slate-200 transition shadow-xs flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
+                      >
+                        <IconComponent />
+                        <span className={socialProviders.length > 1 ? "hidden sm:inline text-xs" : "text-sm"}>
+                          {provider.name}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            )}
 
             {/* Footer Link */}
             <p className="text-xs text-slate-600 dark:text-slate-400 text-center mt-6">
